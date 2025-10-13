@@ -1,0 +1,78 @@
+'use client';
+
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+
+interface User {
+  id: number;
+  stravaId: number;
+  name: string;
+  email: string;
+}
+
+interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  login: () => void;
+  logout: () => void;
+  setUser: (user: User) => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUserState] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Check for stored user data on mount
+    const storedUser = localStorage.getItem('strava-coverage-user');
+    if (storedUser) {
+      try {
+        const userData = JSON.parse(storedUser);
+        setUserState(userData);
+      } catch (error) {
+        console.error('Error parsing stored user data:', error);
+        localStorage.removeItem('strava-coverage-user');
+      }
+    }
+    setIsLoading(false);
+  }, []);
+
+  const setUser = (userData: User) => {
+    setUserState(userData);
+    localStorage.setItem('strava-coverage-user', JSON.stringify(userData));
+  };
+
+  const login = () => {
+    // Redirect to backend OAuth endpoint
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+    window.location.href = `${apiUrl}/oauth/authorize`;
+  };
+
+  const logout = () => {
+    setUserState(null);
+    localStorage.removeItem('strava-coverage-user');
+  };
+
+  return (
+    <AuthContext.Provider 
+      value={{ 
+        user, 
+        isLoading, 
+        login, 
+        logout, 
+        setUser 
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+}
