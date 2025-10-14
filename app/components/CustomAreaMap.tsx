@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import AreaNameDialog from './AreaNameDialog';
+import { UI_STRINGS, TOOLTIPS } from '@/app/lib/constants';
 
 interface DrawnArea {
   id: string;
@@ -20,6 +22,8 @@ export default function CustomAreaMap({ onAreaDrawn, drawnAreas }: CustomAreaMap
   const [isMapReady, setIsMapReady] = useState(false);
   const [leafletElements, setLeafletElements] = useState<any>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [pendingArea, setPendingArea] = useState<{ coordinates: [number, number][] } | null>(null);
+  const [showNameDialog, setShowNameDialog] = useState(false);
 
   useEffect(() => {
     if (!mapRef.current || isMapReady || leafletElements) return;
@@ -132,18 +136,9 @@ export default function CustomAreaMap({ onAreaDrawn, drawnAreas }: CustomAreaMap
           console.log('Draw event created:', coordinates);
           drawnItems.addLayer(layer);
           
-          // Generate a unique ID and name
-          const id = Date.now().toString();
-          const name = `Custom Area ${drawnItems.getLayers().length}`;
-          
-          const drawnArea: DrawnArea = {
-            id,
-            name,
-            coordinates
-          };
-          
-          console.log('Calling onAreaDrawn with:', drawnArea);
-          onAreaDrawn(drawnArea);
+          // Store pending area and show naming dialog
+          setPendingArea({ coordinates });
+          setShowNameDialog(true);
         });
 
         map.on('draw:edited', () => {
@@ -227,6 +222,64 @@ export default function CustomAreaMap({ onAreaDrawn, drawnAreas }: CustomAreaMap
     });
   }, [drawnAreas, leafletElements, isMapReady]);
 
+  const handleSaveName = (name: string) => {
+    if (!pendingArea) return;
+    
+    const id = Date.now().toString();
+    const drawnArea: DrawnArea = {
+      id,
+      name,
+      coordinates: pendingArea.coordinates
+    };
+    
+    console.log('Calling onAreaDrawn with:', drawnArea);
+    onAreaDrawn(drawnArea);
+    
+    // Reset state
+    setPendingArea(null);
+    setShowNameDialog(false);
+  };
+
+  const handleCancelName = () => {
+    // Remove the drawn layer since user cancelled
+    if (leafletElements && pendingArea) {
+      const { drawnItems } = leafletElements;
+      drawnItems.clearLayers();
+      
+      // Re-add existing areas
+      drawnAreas.forEach((area, index) => {
+        if (!area || !area.coordinates || !Array.isArray(area.coordinates)) {
+          return;
+        }
+        
+        const latLngs = area.coordinates
+          .filter(coord => Array.isArray(coord) && coord.length >= 2 && 
+                          typeof coord[0] === 'number' && typeof coord[1] === 'number')
+          .map(coord => [coord[0], coord[1]]);
+        
+        if (latLngs.length === 0) {
+          return;
+        }
+        
+        const polygon = leafletElements.L.polygon(latLngs, {
+          color: '#97009c',
+          fillOpacity: 0.3,
+          weight: 2
+        });
+        
+        const tooltipContent = area.coverage !== undefined && area.coverage !== null && typeof area.coverage === 'number' && !isNaN(area.coverage)
+          ? `${area.name}<br/>Coverage: ${area.coverage.toFixed(1)}%`
+          : area.name;
+        
+        polygon.bindTooltip(tooltipContent, { permanent: false, direction: 'center' });
+        drawnItems.addLayer(polygon);
+      });
+    }
+    
+    setPendingArea(null);
+    setShowNameDialog(false);
+  };
+
   return (
     <div className="relative">
       <div 
@@ -249,6 +302,14 @@ export default function CustomAreaMap({ onAreaDrawn, drawnAreas }: CustomAreaMap
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
         </div>
       )}
+      
+      {/* Area Naming Dialog */}
+      <AreaNameDialog
+        isOpen={showNameDialog}
+        onSave={handleSaveName}
+        onCancel={handleCancelName}
+        defaultName={`Custom Area ${(drawnAreas.length + 1)}`}
+      />
     </div>
   );
 }

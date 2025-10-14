@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { usersAPI } from '@/app/lib/api';
 
 interface User {
   id: number;
@@ -15,6 +16,7 @@ interface AuthContextType {
   login: () => void;
   logout: () => void;
   setUser: (user: User) => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -54,6 +56,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('strava-coverage-user');
   };
 
+  const refreshUser = async () => {
+    if (!user?.id) return;
+    
+    try {
+      const response = await usersAPI.getById(user.id);
+      const updatedUser = {
+        ...user,
+        name: response.data.name || user.name,
+      };
+      setUser(updatedUser);
+    } catch (error) {
+      console.error('Failed to refresh user data:', error);
+    }
+  };
+
   return (
     <AuthContext.Provider 
       value={{ 
@@ -61,7 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading, 
         login, 
         logout, 
-        setUser 
+        setUser,
+        refreshUser 
       }}
     >
       {children}

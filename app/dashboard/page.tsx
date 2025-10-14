@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { importAPI, detectionAPI, coverageAPI, citiesAPI } from '@/app/lib/api';
 import { customAreasAPI, CustomArea } from '@/app/lib/api/customAreas';
+import { UI_STRINGS, TOOLTIPS, ICONS } from '@/app/lib/constants';
 import Navbar from '@/app/components/Navbar';
+import ConfirmationDialog from '@/app/components/ConfirmationDialog';
 import dynamic from 'next/dynamic';
 
 const MapPreview = dynamic(() => import('@/app/components/MapPreview'), {
@@ -13,6 +15,10 @@ const MapPreview = dynamic(() => import('@/app/components/MapPreview'), {
 });
 
 const CustomAreaMap = dynamic(() => import('@/app/components/CustomAreaMap'), {
+  ssr: false
+});
+
+const CityOrCustomAreaSelector = dynamic(() => import('@/app/components/CityOrCustomAreaSelector'), {
   ssr: false
 });
 
@@ -32,6 +38,8 @@ interface City {
   id: number;
   name: string;
   country_code: string;
+  latitude?: number;  // For external cities from geocoding
+  longitude?: number; // For external cities from geocoding
 }
 
 interface CoverageSummary {
@@ -56,7 +64,7 @@ interface CoverageSummary {
 }
 
 export default function Dashboard() {
-  const { user, logout, isLoading } = useAuth();
+  const { user, logout, isLoading, refreshUser } = useAuth();
   const router = useRouter();
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [cities, setCities] = useState<City[]>([]);
@@ -66,12 +74,23 @@ export default function Dashboard() {
   const [processingProgress, setProcessingProgress] = useState<string>('');
   const [customAreas, setCustomAreas] = useState<CustomArea[]>([]);
   const [showCustomAreaMap, setShowCustomAreaMap] = useState(false);
+  const [selectedAreaMode, setSelectedAreaMode] = useState<'city' | 'custom' | null>(null);
+  const [selectedCityId, setSelectedCityId] = useState<number | null>(null);
+  const [deleteAreaId, setDeleteAreaId] = useState<number | null>(null);
+  const [areaToDelete, setAreaToDelete] = useState<CustomArea | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) {
       router.push('/');
     }
   }, [user, isLoading, router]);
+
+  // Refresh user data on component mount to get updated name
+  useEffect(() => {
+    if (user && !isLoading) {
+      refreshUser().catch(console.error);
+    }
+  }, [user?.id, isLoading, refreshUser]);
 
   useEffect(() => {
     if (user) {
@@ -138,7 +157,7 @@ export default function Dashboard() {
         setCurrentStep('idle');
         setProcessingProgress('Error occurred during import polling');
       }
-    }, 2000);
+    }, 60000); // Poll every 60 seconds
   };
 
   const loadCoverageSummary = async () => {
@@ -201,27 +220,87 @@ export default function Dashboard() {
     try {
       console.log('Calculating coverage for area ID:', areaId);
       const response = await customAreasAPI.calculateCoverage(areaId);
-      console.log('Coverage calculated successfully:', response.data);
-      // Reload to get updated coverage
-      await loadCustomAreas();
+      console.log('Coverage calculation started:', response.data);
+      
+      // Show user feedback that calculation started
+      alert('Coverage calculation started in background. Results will appear when complete.');
+      
+      // Start polling for updates every 5 seconds
+      const pollInterval = setInterval(async () => {
+        try {
+          await loadCustomAreas();
+          
+          // Check if this area now has coverage calculated
+          const updatedAreas = await customAreasAPI.getUserAreas(user!.id);
+          const updatedArea = updatedAreas.data.find(area => area.id === areaId);
+          
+          if (updatedArea?.coverage_percentage !== null && updatedArea?.coverage_percentage !== undefined) {
+            console.log(`Coverage calculation completed for area ${areaId}: ${updatedArea.coverage_percentage}%`);
+            clearInterval(pollInterval);
+          }
+        } catch (pollError) {
+          console.error('Error polling for coverage updates:', pollError);
+        }
+      }, 60000); // Poll every 60 seconds
+      
+      // Stop polling after 2 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+      }, 120000);
+      
     } catch (error: any) {
-      console.error('Failed to calculate coverage:', error);
+      console.error('Failed to start coverage calculation:', error);
       console.error('Error response:', error.response?.data);
       console.error('Error status:', error.response?.status);
       console.error('Error message:', error.message);
       
       // Show user-friendly error
-      alert(`Failed to calculate coverage: ${error.response?.data?.error || error.message || 'Unknown error'}`);
+      alert(`Failed to start coverage calculation: ${error.response?.data?.error || error.message || 'Unknown error'}`);
     }
   };
 
   const deleteArea = async (areaId: number) => {
+    const area = customAreas.find(a => a.id === areaId);
+    if (!area) return;
+    
+    setAreaToDelete(area);
+    setDeleteAreaId(areaId);
+  };
+
+  const confirmDeleteArea = async () => {
+    if (!deleteAreaId) return;
+    
     try {
-      await customAreasAPI.delete(areaId);
+      await customAreasAPI.delete(deleteAreaId);
       await loadCustomAreas();
     } catch (error) {
       console.error('Failed to delete custom area:', error);
+      alert(UI_STRINGS.CUSTOM_AREAS.FAILED_TO_DELETE);
+    } finally {
+      setDeleteAreaId(null);
+      setAreaToDelete(null);
     }
+  };
+
+  const cancelDeleteArea = () => {
+    setDeleteAreaId(null);
+    setAreaToDelete(null);
+  };
+
+  const handleCitySelected = async (cityId: number) => {
+    setSelectedCityId(cityId);
+    setSelectedAreaMode('city');
+    setShowCustomAreaMap(false);
+    
+    // Redirect to city coverage view or load city-specific coverage
+    console.log('Selected city ID:', cityId);
+    // You can implement city-specific coverage loading here
+  };
+
+  const handleCustomAreaModeSelected = () => {
+    setSelectedAreaMode('custom');
+    setSelectedCityId(null);
+    setShowCustomAreaMap(true);
   };
 
   const startAutomatedWorkflow = async () => {
@@ -238,7 +317,7 @@ export default function Dashboard() {
       // Poll for import completion
       let importCompleted = false;
       while (!importCompleted) {
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+        await new Promise(resolve => setTimeout(resolve, 60000)); // Wait 60 seconds
         try {
           const response = await importAPI.getStatus(user.id);
           const status = response.data;
@@ -307,6 +386,23 @@ export default function Dashboard() {
       <Navbar />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Welcome Section */}
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg shadow-lg p-6 mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold mb-2">
+                {UI_STRINGS.HEADINGS.WELCOME}, {user.name}!
+              </h1>
+              <p className="text-blue-100 text-lg">
+                Ready to explore your Strava coverage analysis
+              </p>
+            </div>
+            <div className="text-4xl">
+              {ICONS.MAP}
+            </div>
+          </div>
+        </div>
+
         {/* Automated Workflow - Only show if no coverage data exists yet */}
         {(!coverageSummary || !coverageSummary.city_coverage || coverageSummary.city_coverage.length === 0) && (
           <div className="bg-white rounded-lg shadow-md p-6 mb-8">
@@ -403,21 +499,20 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Custom Areas Section */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">Custom Map Areas</h2>
-            <button
-              onClick={() => setShowCustomAreaMap(!showCustomAreaMap)}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-            >
-              {showCustomAreaMap ? 'Hide Map' : 'Draw New Area'}
-            </button>
-          </div>
+        {/* Area Selection Section */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">Coverage Analysis</h2>
+          
+          {/* City or Custom Area Selector */}
+          <CityOrCustomAreaSelector
+            cities={cities}
+            onCitySelected={handleCitySelected}
+            onCustomAreaModeSelected={handleCustomAreaModeSelected}
+          />
 
           {/* Custom Area Drawing Map */}
-          {showCustomAreaMap && (
-            <div className="mb-6">
+          {selectedAreaMode === 'custom' && showCustomAreaMap && (
+            <div className="bg-white rounded-lg shadow-md p-6 mb-6">
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-800 mb-2">Draw Your Custom Area</h3>
                 <p className="text-gray-600">
@@ -437,16 +532,42 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Custom Areas List */}
-          <div>
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Your Custom Areas</h3>
+          {/* Selected City Display */}
+          {selectedAreaMode === 'city' && selectedCityId && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-blue-800 mb-1">
+                    Selected City: {cities.find(city => city.id === selectedCityId)?.name}
+                  </h3>
+                  <p className="text-blue-600">
+                    Country: {cities.find(city => city.id === selectedCityId)?.country_code}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    // TODO: Navigate to city coverage view or calculate city coverage
+                    console.log('Calculate coverage for city:', selectedCityId);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  View Coverage
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Custom Areas List - Only show when custom mode is selected */}
+          {selectedAreaMode === 'custom' && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Your Custom Areas</h3>
             {customAreas.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <svg className="w-12 h-12 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m0 0L9 7" />
                 </svg>
-                <p className="text-lg font-medium mb-2">No custom areas yet</p>
-                <p>Click "Draw New Area" to create your first custom coverage area</p>
+                <p className="text-lg font-medium mb-2">{UI_STRINGS.CUSTOM_AREAS.NO_AREAS_YET}</p>
+                <p>{UI_STRINGS.CUSTOM_AREAS.CREATE_FIRST_AREA}</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -456,7 +577,8 @@ export default function Dashboard() {
                       <h4 className="font-semibold text-gray-900">{area.name}</h4>
                       <button
                         onClick={() => deleteArea(area.id)}
-                        className="text-red-500 hover:text-red-700 transition-colors"
+                        title={TOOLTIPS.BUTTONS.DELETE_AREA}
+                        className="text-red-500 hover:text-red-700 transition-colors p-1 rounded hover:bg-red-50"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -467,7 +589,7 @@ export default function Dashboard() {
                     {area.coverage_percentage !== null && area.coverage_percentage !== undefined ? (
                       <div className="mb-3">
                         <div className="flex justify-between text-sm mb-1">
-                          <span>Coverage:</span>
+                          <span>{UI_STRINGS.CUSTOM_AREAS.COVERAGE_LABEL}</span>
                           <span className="font-semibold">{area.coverage_percentage.toFixed(1)}%</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
@@ -476,27 +598,29 @@ export default function Dashboard() {
                             style={{ width: `${Math.min(area.coverage_percentage, 100)}%` }}
                           />
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">{area.activities_count} activities</p>
+                        <p className="text-xs text-gray-500 mt-1">{area.activities_count} {UI_STRINGS.CUSTOM_AREAS.ACTIVITIES_LABEL}</p>
                       </div>
                     ) : (
                       <div className="mb-3">
                         <button
                           onClick={() => calculateAreaCoverage(area.id)}
+                          title={TOOLTIPS.BUTTONS.CALCULATE_COVERAGE}
                           className="w-full px-3 py-2 bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 transition-colors text-sm"
                         >
-                          Calculate Coverage
+                          {UI_STRINGS.BUTTONS.CALCULATE_COVERAGE}
                         </button>
                       </div>
                     )}
 
-                    <div className="text-xs text-gray-400">
-                      Created: {new Date(area.created_at).toLocaleDateString()}
+                    <div className="text-xs text-gray-500 mt-2">
+                      {UI_STRINGS.CUSTOM_AREAS.CREATED_LABEL} {new Date(area.created_at).toLocaleDateString()}
                     </div>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Quick Actions */}
@@ -619,6 +743,17 @@ export default function Dashboard() {
           )}
         </div>
       </main>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={deleteAreaId !== null}
+        title={UI_STRINGS.BUTTONS.DELETE + ' Area'}
+        message={`${UI_STRINGS.CUSTOM_AREAS.DELETE_CONFIRMATION}\n\n"${areaToDelete?.name}"`}
+        onConfirm={confirmDeleteArea}
+        onCancel={cancelDeleteArea}
+        confirmText={UI_STRINGS.BUTTONS.DELETE}
+        isDestructive={true}
+      />
     </div>
   );
 }

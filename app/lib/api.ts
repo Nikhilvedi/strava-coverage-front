@@ -33,10 +33,22 @@ export const authAPI = {
   healthCheck: () => apiClient.get('/api/health'),
 };
 
+// Users API endpoints
+export const usersAPI = {
+  getById: (id: number) => apiClient.get(`/api/users/${id}`),
+};
+
 // Cities API endpoints  
 export const citiesAPI = {
   getAll: () => apiClient.get('/api/cities/'),
   getById: (id: number) => apiClient.get(`/api/cities/${id}`),
+  search: (query: string) => apiClient.get(`/api/cities/search?q=${encodeURIComponent(query)}`),
+  createFromExternal: (cityData: {
+    name: string;
+    country_code: string;
+    latitude: number;
+    longitude: number;
+  }) => apiClient.post('/api/cities/external', cityData),
 };
 
 // Import API endpoints
