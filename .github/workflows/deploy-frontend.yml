@@ -48,28 +48,33 @@ jobs:
 
     - name: Validate secrets
       run: |
-        echo "Checking required secrets..."
-        GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
-        GCP_SA_KEY="${{ secrets.GCP_SA_KEY }}"
+        echo "✅ Checking required secrets..."
         
-        if [ -z "${GCP_PROJECT_ID}" ]; then
+        # Check if PROJECT_ID is set
+        if [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
           echo "❌ GCP_PROJECT_ID secret is not set"
           exit 1
         fi
-        if [ -z "${GCP_SA_KEY}" ]; then
-          echo "❌ GCP_SA_KEY secret is not set"
-          exit 1
-        fi
-        echo "✅ Required secrets are present"
         
-        # Validate JSON format
-        echo "Validating GCP_SA_KEY format..."
-        if echo "${GCP_SA_KEY}" | grep -q '^{.*}$'; then
-          echo "✅ GCP_SA_KEY appears to be JSON format"
-        else
-          echo "❌ GCP_SA_KEY does not appear to be JSON format"
+        # Check if SA_KEY is set by writing to temp file and checking
+        echo '${{ secrets.GCP_SA_KEY }}' > /tmp/sa_key.json
+        if [ ! -s /tmp/sa_key.json ]; then
+          echo "❌ GCP_SA_KEY secret is not set"
+          rm -f /tmp/sa_key.json
           exit 1
         fi
+        
+        # Validate JSON format using jq
+        if jq empty /tmp/sa_key.json 2>/dev/null; then
+          echo "✅ GCP_SA_KEY is valid JSON format"
+        else
+          echo "❌ GCP_SA_KEY is not valid JSON format"
+          rm -f /tmp/sa_key.json
+          exit 1
+        fi
+        
+        rm -f /tmp/sa_key.json
+        echo "✅ All secrets validation passed"
 
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
