@@ -49,11 +49,14 @@ jobs:
     - name: Validate secrets
       run: |
         echo "Checking required secrets..."
-        if [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
+        GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+        GCP_SA_KEY="${{ secrets.GCP_SA_KEY }}"
+        
+        if [ -z "${GCP_PROJECT_ID}" ]; then
           echo "❌ GCP_PROJECT_ID secret is not set"
           exit 1
         fi
-        if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+        if [ -z "${GCP_SA_KEY}" ]; then
           echo "❌ GCP_SA_KEY secret is not set"
           exit 1
         fi
@@ -61,7 +64,7 @@ jobs:
         
         # Validate JSON format
         echo "Validating GCP_SA_KEY format..."
-        if [[ "${{ secrets.GCP_SA_KEY }}" == "{"* ]]; then
+        if echo "${GCP_SA_KEY}" | grep -q '^{.*}$'; then
           echo "✅ GCP_SA_KEY appears to be JSON format"
         else
           echo "❌ GCP_SA_KEY does not appear to be JSON format"
