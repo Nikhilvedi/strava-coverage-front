@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { mapsAPI } from '@/app/lib/api';
+import { getActivityColor } from '@/app/lib/activityColors';
 
 interface MapConfig {
   default_center: [number, number];
@@ -197,7 +198,7 @@ export default function MapComponent({
             weight: 2,
             opacity: 0.8,
           },
-          onEachFeature: (feature, layer) => {
+          onEachFeature: (feature: any, layer: any) => {
             if (feature.properties) {
               const popupContent = `
                 <div class="p-2">
@@ -215,7 +216,7 @@ export default function MapComponent({
         layersRef.current.cities?.addLayer(geoJsonLayer);
 
         // Fit map to cities bounds if showing specific city
-        if (cityId && response.data.type === 'Feature') {
+        if (cityId) {
           const bounds = geoJsonLayer.getBounds();
           if (bounds.isValid()) {
             mapInstanceRef.current?.fitBounds(bounds);
@@ -249,21 +250,27 @@ export default function MapComponent({
 
         console.log('Activities response:', response.data);
         const geoJsonLayer = leafletRef.current.geoJSON(response.data, {
-          style: {
-            color: '#ff6b35',
-            weight: 3,
-            opacity: 0.8,
+          style: (feature: any) => {
+            const activityType = feature?.properties?.activity_type;
+            const sportType = feature?.properties?.sport_type;
+            const color = getActivityColor(activityType, sportType);
+            
+            return {
+              color: color,
+              weight: 3,
+              opacity: 0.8,
+            };
           },
-          onEachFeature: (feature, layer) => {
+          onEachFeature: (feature: any, layer: any) => {
             if (feature.properties) {
               const props = feature.properties;
               const popupContent = `
                 <div class="p-2 min-w-48">
-                  <h3 class="font-semibold text-lg">${props.name || 'Activity'}</h3>
+                  <h3 class="font-semibold text-lg">${props.activity_id ? `Activity ${props.activity_id}` : 'Activity'}</h3>
                   <div class="space-y-1 text-sm">
-                    <p><span class="font-medium">Type:</span> ${props.type || 'Unknown'}</p>
-                    <p><span class="font-medium">Distance:</span> ${props.distance ? (props.distance / 1000).toFixed(2) + ' km' : 'N/A'}</p>
-                    <p><span class="font-medium">Date:</span> ${props.start_date ? new Date(props.start_date).toLocaleDateString() : 'N/A'}</p>
+                    <p><span class="font-medium">Type:</span> ${props.activity_type || props.sport_type || 'Unknown'}</p>
+                    <p><span class="font-medium">Distance:</span> ${props.distance_km ? props.distance_km.toFixed(2) + ' km' : 'N/A'}</p>
+                    ${props.coverage_percentage ? `<p><span class="font-medium">Coverage:</span> ${props.coverage_percentage.toFixed(1)}%</p>` : ''}
                     ${props.city_name ? `<p><span class="font-medium">City:</span> ${props.city_name}</p>` : ''}
                   </div>
                 </div>
@@ -301,7 +308,7 @@ export default function MapComponent({
         const response = await mapsAPI.getCoverage(userId, cityId);
 
         const geoJsonLayer = leafletRef.current.geoJSON(response.data, {
-          style: (feature) => {
+          style: (feature: any) => {
             // Style based on coverage status
             const isCovered = feature?.properties?.covered || false;
             return {
@@ -312,7 +319,7 @@ export default function MapComponent({
               opacity: 0.8,
             };
           },
-          onEachFeature: (feature, layer) => {
+          onEachFeature: (feature: any, layer: any) => {
             if (feature.properties) {
               const props = feature.properties;
               const popupContent = `

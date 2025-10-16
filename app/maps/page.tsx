@@ -2,10 +2,11 @@
 
 import { useAuth } from '@/app/context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense, useCallback } from 'react';
 import { citiesAPI, coverageAPI } from '@/app/lib/api';
 import Navbar from '@/app/components/Navbar';
 import dynamic from 'next/dynamic';
+import { ACTIVITY_COLORS, getActivityColor } from '@/app/lib/activityColors';
 
 const MapComponent = dynamic(() => import('@/app/components/MapComponent'), {
   ssr: false,
@@ -16,6 +17,18 @@ interface City {
   id: number;
   name: string;
   country_code: string;
+}
+
+interface CityWithCoverage {
+  id: number;
+  name: string;
+  country_code: string;
+  area_km2: number;
+  activity_count: number;
+  average_coverage_percent: number;
+  max_coverage_percent: number;
+  total_distance_km: number;
+  last_activity_date: string;
 }
 
 interface CoverageSummary {
@@ -39,11 +52,11 @@ interface CoverageSummary {
   };
 }
 
-export default function MapsPage() {
+function MapsPageContent() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [cities, setCities] = useState<City[]>([]);
+  const [cities, setCities] = useState<CityWithCoverage[]>([]);
   const [selectedCityId, setSelectedCityId] = useState<number | null>(null);
   const [coverageSummary, setCoverageSummary] = useState<CoverageSummary | null>(null);
   const [showLayers, setShowLayers] = useState({
@@ -60,9 +73,6 @@ export default function MapsPage() {
 
   useEffect(() => {
     if (user) {
-      loadCities();
-      loadCoverageSummary();
-      
       // Check for city parameter in URL
       const cityParam = searchParams.get('city');
       if (cityParam) {
@@ -75,17 +85,19 @@ export default function MapsPage() {
     }
   }, [user, searchParams]);
 
-  const loadCities = async () => {
+  const loadCities = useCallback(async () => {
+    if (!user?.id) return;
+    
     try {
-      const response = await citiesAPI.getAll();
-      setCities(response.data);
+      const response = await citiesAPI.getUserCitiesWithCoverage(user.id);
+      setCities(response.data.cities || []);
     } catch (error) {
-      console.error('Failed to load cities:', error);
+      console.error('Failed to load user cities:', error);
     }
-  };
+  }, [user?.id]);
 
-  const loadCoverageSummary = async () => {
-    if (!user) return;
+  const loadCoverageSummary = useCallback(async () => {
+    if (!user?.id) return;
     
     try {
       const response = await coverageAPI.getSummary(user.id);
@@ -93,13 +105,32 @@ export default function MapsPage() {
     } catch (error) {
       console.error('Failed to load coverage summary:', error);
     }
-  };
+  }, [user?.id]);
 
-  const getCityWithCoverage = (cityId: number) => {
-    const city = cities?.find(c => c.id === cityId);
-    const coverageData = coverageSummary?.city_coverage?.find(c => c.city_id === cityId);
-    return { city, coverage: coverageData };
-  };
+  // Load data when user changes
+  useEffect(() => {
+    if (user?.id) {
+      loadCities();
+      loadCoverageSummary();
+    }
+  }, [user?.id, loadCities, loadCoverageSummary]);
+
+  // Set default city to user's most active city when data loads
+  useEffect(() => {
+    if (cities && cities.length > 0 && !selectedCityId && !searchParams.get('city')) {
+      // Cities are already sorted by coverage (highest first)
+      const bestCity = cities[0];
+      
+      if (bestCity) {
+        setSelectedCityId(bestCity.id);
+        setShowLayers(prev => ({ ...prev, coverage: true }));
+      }
+    }
+  }, [cities, selectedCityId, searchParams]);
+
+
+
+
 
   if (isLoading) {
     return (
@@ -168,7 +199,15 @@ export default function MapsPage() {
               
               <div className="space-y-2">
                 <button
-                  onClick={() => setSelectedCityId(null)}
+                  onClick={() => {
+                    setSelectedCityId(null);
+                    setShowLayers(prev => ({ ...prev, coverage: false }));
+                    
+                    // Clear city parameter from URL
+                    const newUrl = new URL(window.location.href);
+                    newUrl.searchParams.delete('city');
+                    window.history.pushState({}, '', newUrl.toString());
+                  }}
                   className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
                     selectedCityId === null 
                       ? 'bg-orange-100 text-orange-800 border border-orange-300' 
@@ -180,11 +219,18 @@ export default function MapsPage() {
                 </button>
 
                 {cities.map((city) => {
-                  const { coverage } = getCityWithCoverage(city.id);
                   return (
                     <button
                       key={city.id}
-                      onClick={() => setSelectedCityId(city.id)}
+                      onClick={() => {
+                        setSelectedCityId(city.id);
+                        setShowLayers(prev => ({ ...prev, coverage: true }));
+                        
+                        // Update URL to reflect city selection
+                        const newUrl = new URL(window.location.href);
+                        newUrl.searchParams.set('city', city.id.toString());
+                        window.history.pushState({}, '', newUrl.toString());
+                      }}
                       className={`w-full text-left px-3 py-2 rounded-md transition-colors ${
                         selectedCityId === city.id 
                           ? 'bg-orange-100 text-orange-800 border border-orange-300' 
@@ -196,22 +242,50 @@ export default function MapsPage() {
                           <div className="font-medium">{city.name}</div>
                           <div className="text-sm text-gray-600">{city.country_code}</div>
                         </div>
-                        {coverage && (
-                          <div className="text-right">
-                            <div className="text-sm font-semibold text-orange-600">
-                              {coverage.coverage_percent.toFixed(1)}%
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {coverage.activity_count} activities
-                            </div>
+                        <div className="text-right">
+                          <div className="text-sm font-semibold text-orange-600">
+                            {city.average_coverage_percent.toFixed(1)}%
                           </div>
-                        )}
+                          <div className="text-xs text-gray-500">
+                            {city.activity_count} activities
+                          </div>
+                        </div>
                       </div>
                     </button>
                   );
                 })}
               </div>
             </div>
+
+            {/* Activity Type Legend */}
+            {showLayers.activities && (
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Activity Types</h3>
+                
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: ACTIVITY_COLORS.Run }}></div>
+                    <span className="text-sm text-gray-700">Running</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: ACTIVITY_COLORS.Ride }}></div>
+                    <span className="text-sm text-gray-700">Cycling</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: ACTIVITY_COLORS.Walk }}></div>
+                    <span className="text-sm text-gray-700">Walking</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: ACTIVITY_COLORS.Hike }}></div>
+                    <span className="text-sm text-gray-700">Hiking</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-4 rounded" style={{ backgroundColor: ACTIVITY_COLORS.default }}></div>
+                    <span className="text-sm text-gray-700">Other Activities</span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Coverage Legend */}
             {showLayers.coverage && selectedCityId && (
@@ -226,10 +300,6 @@ export default function MapsPage() {
                   <div className="flex items-center space-x-2">
                     <div className="w-4 h-4 bg-red-500 rounded"></div>
                     <span className="text-sm text-gray-700">Uncovered Areas</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-4 bg-orange-500 rounded"></div>
-                    <span className="text-sm text-gray-700">Activity Paths</span>
                   </div>
                 </div>
               </div>
@@ -247,17 +317,17 @@ export default function MapsPage() {
                   }
                 </h2>
                 
-                {selectedCityId && coverageSummary && (
+                {selectedCityId && cities && (
                   <div className="text-right">
                     {(() => {
-                      const coverage = coverageSummary.city_coverage.find(c => c.city_id === selectedCityId);
-                      return coverage ? (
+                      const city = cities.find(c => c.id === selectedCityId);
+                      return city ? (
                         <>
                           <div className="text-2xl font-bold text-orange-600">
-                            {coverage.coverage_percent.toFixed(1)}%
+                            {city.average_coverage_percent.toFixed(1)}%
                           </div>
                           <div className="text-sm text-gray-600">
-                            {coverage.activity_count} activities
+                            {city.activity_count} activities
                           </div>
                         </>
                       ) : (
@@ -269,6 +339,7 @@ export default function MapsPage() {
               </div>
 
               <MapComponent
+                key={`map-${selectedCityId || 'all'}`}
                 userId={user.id}
                 cityId={selectedCityId || undefined}
                 showCities={showLayers.cities}
@@ -293,5 +364,17 @@ export default function MapsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MapsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+      </div>
+    }>
+      <MapsPageContent />
+    </Suspense>
   );
 }

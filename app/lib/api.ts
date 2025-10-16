@@ -41,6 +41,8 @@ export const usersAPI = {
 // Cities API endpoints  
 export const citiesAPI = {
   getAll: () => apiClient.get('/api/cities/'),
+  getUserCities: (userId: number) => apiClient.get(`/api/cities/user/${userId}`),
+  getUserCitiesWithCoverage: (userId: number) => apiClient.get(`/api/cities/user/${userId}/coverage`),
   getById: (id: number) => apiClient.get(`/api/cities/${id}`),
   search: (query: string) => apiClient.get(`/api/cities/search?q=${encodeURIComponent(query)}`),
   createFromExternal: (cityData: {
@@ -81,6 +83,17 @@ export const mapsAPI = {
   getCityBounds: (cityId: number) => apiClient.get(`/api/maps/bounds/city/${cityId}`),
   getUserBounds: (userId: number) => apiClient.get(`/api/maps/bounds/user/${userId}`),
   getStyles: () => apiClient.get('/api/maps/styles'),
+};
+
+// Comments API endpoints
+export const commentsAPI = {
+  getSettings: (userId: number) => apiClient.get(`/api/comments/settings/user/${userId}`),
+  updateSettings: (userId: number, settings: any) => 
+    apiClient.put(`/api/comments/settings/user/${userId}`, settings),
+  processComments: (userId: number) => 
+    apiClient.post(`/api/comments/process/user/${userId}`),
+  getCoverageIncreases: (userId: number) => 
+    apiClient.get(`/api/comments/increases/user/${userId}`),
 };
 
 export default apiClient;

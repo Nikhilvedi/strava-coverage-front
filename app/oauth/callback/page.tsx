@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/app/context/AuthContext';
 
-export default function OAuthCallback() {
+function OAuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setUser } = useAuth();
@@ -52,11 +52,11 @@ export default function OAuthCallback() {
           setUser(userData);
           setStatus('success');
           
-          // Try immediate redirect first
+          // Use Next.js router for proper navigation
           setTimeout(() => {
             console.log('Redirecting to dashboard...');
-            window.location.href = '/dashboard';
-          }, 1500); // Reduced timeout
+            router.push('/dashboard');
+          }, 1000); // Slightly reduced timeout
           return;
         }
 
@@ -133,5 +133,17 @@ export default function OAuthCallback() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function OAuthCallback() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+      </div>
+    }>
+      <OAuthCallbackContent />
+    </Suspense>
   );
 }

@@ -2,17 +2,38 @@
 
 import { useAuth } from '@/app/context/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { commentsAPI } from '@/app/lib/api';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [customAreasEnabled, setCustomAreasEnabled] = useState(false);
+
+  useEffect(() => {
+    const loadFeatureSettings = async () => {
+      if (!user?.id) return;
+      
+      try {
+        const response = await commentsAPI.getSettings(user.id);
+        setCustomAreasEnabled(response.data.settings?.custom_areas_enabled || false);
+      } catch (error) {
+        console.error('Failed to load feature settings:', error);
+        setCustomAreasEnabled(false);
+      }
+    };
+
+    loadFeatureSettings();
+  }, [user?.id]);
 
   if (!user) return null;
 
   const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊' },
     { name: 'Maps', path: '/maps', icon: '🗺️' },
+    ...(customAreasEnabled ? [{ name: 'Areas', path: '/areas', icon: '🎯' }] : []),
+    { name: 'Settings', path: '/settings', icon: '⚙️' },
   ];
 
   return (

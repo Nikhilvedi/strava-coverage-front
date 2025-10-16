@@ -40,21 +40,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const setUser = useCallback((userData: User) => {
+  const setUser = (userData: User) => {
     setUserState(userData);
     localStorage.setItem('strava-coverage-user', JSON.stringify(userData));
-  }, []);
+  };
 
-  const login = useCallback(() => {
+  const login = () => {
     // Redirect to backend OAuth endpoint
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
     window.location.href = `${apiUrl}/oauth/authorize`;
-  }, []);
+  };
 
-  const logout = useCallback(() => {
+  const logout = () => {
     setUserState(null);
     localStorage.removeItem('strava-coverage-user');
-  }, []);
+  };
 
   const refreshUser = useCallback(async () => {
     if (!user?.id) return;
@@ -65,12 +65,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ...user,
         name: response.data.name || user.name,
       };
-      setUserState(updatedUser);
-      localStorage.setItem('strava-coverage-user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
     } catch (error) {
       console.error('Failed to refresh user data:', error);
     }
-  }, [user?.id]);
+  }, [user?.id, user?.name]);
 
   return (
     <AuthContext.Provider 
