@@ -114,6 +114,9 @@ jobs:
         COPY --from=deps /app/node_modules ./node_modules
         COPY . .
         
+        # Accept build argument for API URL
+        ARG NEXT_PUBLIC_API_URL
+        ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
         ENV NEXT_TELEMETRY_DISABLED=1
         RUN npm run build
         
@@ -145,8 +148,8 @@ jobs:
 
     - name: Build and push Docker image
       run: |
-        # Build the image
-        docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA .
+        # Build the image with API URL build argument
+        docker build --build-arg NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }} -t us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA .
         
         # Push to Artifact Registry
         docker push us-central1-docker.pkg.dev/$PROJECT_ID/strava-coverage/$SERVICE_NAME:$GITHUB_SHA
@@ -167,7 +170,6 @@ jobs:
           --cpu 1 \
           --max-instances 5 \
           --set-env-vars NODE_ENV=production \
-          --set-env-vars NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }} \
           --project $PROJECT_ID
 
     - name: Get service URL
