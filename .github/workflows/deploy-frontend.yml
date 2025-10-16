@@ -114,21 +114,22 @@ jobs:
         COPY --from=deps /app/node_modules ./node_modules
         COPY . .
         
-        ENV NEXT_TELEMETRY_DISABLED 1
+        ENV NEXT_TELEMETRY_DISABLED=1
         RUN npm run build
         
         # Production image, copy all the files and run next
         FROM base AS runner
         WORKDIR /app
         
-        ENV NODE_ENV production
-        ENV NEXT_TELEMETRY_DISABLED 1
+        ENV NODE_ENV=production
+        ENV NEXT_TELEMETRY_DISABLED=1
         
         RUN addgroup --system --gid 1001 nodejs
         RUN adduser --system --uid 1001 nextjs
         
         COPY --from=builder /app/public ./public
         
+        # Copy standalone output (only if it exists)
         COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
         COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
         
@@ -136,18 +137,11 @@ jobs:
         
         EXPOSE 3000
         
-        ENV PORT 3000
-        ENV HOSTNAME "0.0.0.0"
+        ENV PORT=3000
+        ENV HOSTNAME="0.0.0.0"
         
         CMD ["node", "server.js"]
         EOF
-
-    - name: Update next.config.ts for standalone
-      run: |
-        # Add standalone output configuration if not present
-        if ! grep -q "output.*standalone" next.config.ts; then
-          sed -i "s/const nextConfig = {/const nextConfig = {\n  output: 'standalone',/" next.config.ts
-        fi
 
     - name: Build and push Docker image
       run: |
